@@ -1,0 +1,28 @@
+.env
+.DS_Store
+.tmp/
+
+# Compiled Go binaries emitted by "go build"
+/goway
+/cmd/goway/goway
+/example/example
+*.exe
+*.test
+*.out
+
+# Local scratch files
+*.tmp
+
+# Editor and local tool state
+.idea/
+.vscode/
+.claude/settings.local.json
+
+# Documentation site build output and dependencies
+docs/node_modules/
+docs/dist/
+docs/.astro/
+
+# Local agent and editor state
+.claude/
+/cmd/goway/flyway

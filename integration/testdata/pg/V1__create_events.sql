@@ -1,0 +1,4 @@
+CREATE TABLE events (
+    id   INTEGER PRIMARY KEY,
+    kind VARCHAR(50) NOT NULL
+);
