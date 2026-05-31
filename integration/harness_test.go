@@ -20,7 +20,7 @@ import (
 
 // migrationsFS holds the test migration scripts embedded into the test binary.
 //
-//go:embed testdata/shared/*.sql testdata/pg/*.sql testdata/sqlite/*.sql testdata/placeholder/*.sql
+//go:embed testdata/shared/*.sql testdata/pg/*.sql testdata/sqlite/*.sql testdata/placeholder/*.sql testdata/notx_pg/*.sql testdata/notx_sqlite/*.sql testdata/callbacks/*.sql
 var migrationsFS embed.FS
 
 const defaultPostgresImage = "postgres:18-alpine"

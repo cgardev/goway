@@ -8,20 +8,22 @@ import (
 // resolveMigrations scans every configured source, parses each candidate file
 // name, computes its checksum, and returns the resolved migrations sorted in
 // the order they would be applied: versioned migrations by ascending version,
-// followed by repeatable migrations by ascending description. Duplicate
+// followed by repeatable migrations by ascending description. Callback scripts
+// are returned separately, in the order they were discovered. Duplicate
 // versions or repeatable descriptions are rejected.
-func resolveMigrations(configuration *Configuration) ([]*resolvedMigration, error) {
+func resolveMigrations(configuration *Configuration) ([]*resolvedMigration, []sqlCallback, error) {
 	var scanned []scannedFile
 	for _, source := range configuration.sources() {
 		files, err := source.scan()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		scanned = append(scanned, files...)
 	}
 
 	var versioned []*resolvedMigration
 	var repeatable []*resolvedMigration
+	var callbacks []sqlCallback
 	seenVersions := make(map[string]string)
 	seenRepeatable := make(map[string]string)
 
@@ -34,12 +36,16 @@ func resolveMigrations(configuration *Configuration) ([]*resolvedMigration, erro
 			configuration.sqlMigrationSuffixes,
 		)
 		if !parsed.valid {
+			// A file that is not a migration may still be a callback script.
+			if event, ok := parseCallbackName(file.name, configuration.sqlMigrationSeparator, configuration.sqlMigrationSuffixes); ok {
+				callbacks = append(callbacks, sqlCallback{event: event, script: file.name, read: file.read})
+			}
 			continue
 		}
 
 		content, err := file.read()
 		if err != nil {
-			return nil, fmt.Errorf("goway: reading migration %s: %w", file.location, err)
+			return nil, nil, fmt.Errorf("goway: reading migration %s: %w", file.location, err)
 		}
 		checksum := calculateChecksum(content)
 		reader := file.read
@@ -50,12 +56,13 @@ func resolveMigrations(configuration *Configuration) ([]*resolvedMigration, erro
 			checksum:      checksum,
 			repeatable:    parsed.repeatable,
 			migrationType: MigrationTypeSQL,
+			noTransaction: scriptRequestsNoTransaction(string(content)),
 			read:          reader,
 		}
 
 		if parsed.repeatable {
 			if previous, exists := seenRepeatable[parsed.description]; exists {
-				return nil, fmt.Errorf("%w: %q and %q both describe %q",
+				return nil, nil, fmt.Errorf("%w: %q and %q both describe %q",
 					ErrDuplicateRepeatable, previous, file.name, parsed.description)
 			}
 			seenRepeatable[parsed.description] = file.name
@@ -65,13 +72,13 @@ func resolveMigrations(configuration *Configuration) ([]*resolvedMigration, erro
 
 		version, err := parseVersion(parsed.rawVersion)
 		if err != nil {
-			return nil, fmt.Errorf("goway: migration %s: %w", file.name, err)
+			return nil, nil, fmt.Errorf("goway: migration %s: %w", file.name, err)
 		}
 		migration.version = version
 
 		key := normalizedVersionKey(version)
 		if previous, exists := seenVersions[key]; exists {
-			return nil, fmt.Errorf("%w: %q and %q both target version %s",
+			return nil, nil, fmt.Errorf("%w: %q and %q both target version %s",
 				ErrDuplicateVersion, previous, file.name, version)
 		}
 		seenVersions[key] = file.name
@@ -88,7 +95,7 @@ func resolveMigrations(configuration *Configuration) ([]*resolvedMigration, erro
 	resolved := make([]*resolvedMigration, 0, len(versioned)+len(repeatable))
 	resolved = append(resolved, versioned...)
 	resolved = append(resolved, repeatable...)
-	return resolved, nil
+	return resolved, callbacks, nil
 }
 
 // normalizedVersionKey produces a canonical key for a version that ignores

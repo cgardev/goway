@@ -1,0 +1,2 @@
+-- goway:noTransaction
+VACUUM;

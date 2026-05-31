@@ -118,14 +118,28 @@ splitter also recognizes backtick and square bracket identifiers and tracks
 `BEGIN`, `CASE` and `END` so the inner statements of a trigger body are kept
 together.
 
+## Callbacks and non-transactional migrations
+
+Lifecycle callbacks fire around the migrate run (`beforeMigrate`,
+`afterMigrate`) and around each applied migration (`beforeEachMigrate`,
+`afterEachMigrate`). They are discovered as SQL scripts in the configured
+locations by their file name, or registered programmatically through the
+`Callback` interface. The per-migration callbacks run on the same executor as
+the migration, so within its transaction when one is used.
+
+A migration whose first comment lines carry a `-- goway:noTransaction` directive
+runs outside the per-migration transaction, on a dedicated connection, for
+statements such as PostgreSQL's `CREATE INDEX CONCURRENTLY` or SQLite's
+`VACUUM`. Because there is no transaction to roll back, a failure is recorded as
+a failed history row that the repair command can clear.
+
 ## Known divergences
 
-- Only the latest run of a repeatable migration is reported by `Info`; Flyway
-  lists every historical run and marks the superseded ones.
 - Placeholder checksums are always computed on the raw content; Flyway computes
   them on the replaced content for repeatable migrations.
-- Code based migrations, lifecycle callbacks, and undo migrations are not
-  implemented.
+- Go code based migrations and undo migrations are not implemented.
+- The grouped and mixed transaction modes are not implemented; each migration
+  runs in its own transaction unless it opts out.
 
 ## Naming and trademark
 

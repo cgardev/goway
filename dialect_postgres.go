@@ -95,6 +95,13 @@ func (d postgresDialect) setSearchPathSQL(schema string) string {
 	return "SET LOCAL search_path TO " + d.quoteIdentifier(schema)
 }
 
+func (d postgresDialect) sessionSearchPathSQL(schema string) string {
+	if schema == "" {
+		return ""
+	}
+	return "SET search_path TO " + d.quoteIdentifier(schema)
+}
+
 // cleanStatements drops the schema and recreates it, which removes every object
 // it contains. This is simpler and more robust than enumerating each object.
 func (d postgresDialect) cleanStatements(_ context.Context, _ querier, schema string) ([]string, error) {
