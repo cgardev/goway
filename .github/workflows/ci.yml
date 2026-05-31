@@ -20,6 +20,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
       - run: go build ./...
       - run: go vet ./...
       - name: Check formatting
@@ -32,28 +33,16 @@ jobs:
           fi
       - run: go test ./... -count=1
 
-  integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: integration/go.mod
-          cache-dependency-path: integration/go.sum
-      - run: go -C integration build ./...
-      - run: go -C integration vet ./...
-      - run: go -C integration test ./... -count=1
-
   cli:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: cmd/flyway/go.mod
-          cache-dependency-path: cmd/flyway/go.sum
-      - run: go -C cmd/flyway build ./...
-      - run: go -C cmd/flyway vet ./...
+          go-version-file: cmd/goway/go.mod
+          cache: false
+      - run: go -C cmd/goway build ./...
+      - run: go -C cmd/goway vet ./...
 
   example:
     runs-on: ubuntu-latest
@@ -62,5 +51,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: example/go.mod
-          cache-dependency-path: example/go.sum
+          cache: false
       - run: go -C example build ./...
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: integration/go.mod
+          cache: false
+      - run: go -C integration build ./...
+      - run: go -C integration vet ./...
+      - run: go -C integration test ./... -count=1
