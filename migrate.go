@@ -72,6 +72,10 @@ func (f *Migrator) Migrate(ctx context.Context) (*MigrateResult, error) {
 		}
 	}
 
+	if err := f.fireCallbacks(ctx, db, EventBeforeMigrate, nil, schema); err != nil {
+		return nil, err
+	}
+
 	for _, entry := range service.pending() {
 		info, err := f.applyMigration(ctx, db, history, entry, schema, installedBy)
 		if err != nil {
@@ -82,13 +86,18 @@ func (f *Migrator) Migrate(ctx context.Context) (*MigrateResult, error) {
 		result.MigrationsExecuted++
 	}
 
+	if err := f.fireCallbacks(ctx, db, EventAfterMigrate, nil, schema); err != nil {
+		result.TargetSchemaVersion = f.currentVersionString(ctx, history)
+		return result, err
+	}
+
 	result.TargetSchemaVersion = f.currentVersionString(ctx, history)
 	return result, nil
 }
 
-// applyMigration executes a single migration inside its own transaction and
-// records it in the schema history. The history row is written in the same
-// transaction as the migration statements, so a failure rolls back both.
+// applyMigration prepares a migration's statements and applies them either
+// within a transaction or, when the script opted out, directly on a dedicated
+// connection.
 func (f *Migrator) applyMigration(ctx context.Context, db *sql.DB, history *schemaHistory, entry *migrationInfoEntry, schema, installedBy string) (MigrationInfo, error) {
 	migration := entry.resolved
 
@@ -107,6 +116,22 @@ func (f *Migrator) applyMigration(ctx context.Context, db *sql.DB, history *sche
 		return MigrationInfo{}, err
 	}
 
+	info := MigrationInfo{
+		Version:     migration.version.String(),
+		Description: migration.description,
+		Type:        string(migration.migrationType),
+		Script:      migration.script,
+	}
+
+	if migration.noTransaction {
+		return f.applyWithoutTransaction(ctx, db, history, migration, statements, schema, installedBy, info, entry.outOfOrder)
+	}
+	return f.applyWithinTransaction(ctx, db, history, migration, statements, schema, installedBy, info, entry.outOfOrder)
+}
+
+// applyWithinTransaction runs the migration and records its history row inside a
+// single transaction, so a failure rolls back both, leaving no partial state.
+func (f *Migrator) applyWithinTransaction(ctx context.Context, db *sql.DB, history *schemaHistory, migration *resolvedMigration, statements []string, schema, installedBy string, info MigrationInfo, outOfOrder bool) (MigrationInfo, error) {
 	transaction, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return MigrationInfo{}, err
@@ -123,11 +148,19 @@ func (f *Migrator) applyMigration(ctx context.Context, db *sql.DB, history *sche
 	}
 
 	start := time.Now()
+	if err := f.fireCallbacks(ctx, transaction, EventBeforeEachMigrate, &info, schema); err != nil {
+		_ = transaction.Rollback()
+		return MigrationInfo{}, err
+	}
 	for _, statement := range statements {
 		if _, err := transaction.ExecContext(ctx, statement); err != nil {
 			_ = transaction.Rollback()
 			return MigrationInfo{}, fmt.Errorf("goway: applying migration %s: %w", migration.script, err)
 		}
+	}
+	if err := f.fireCallbacks(ctx, transaction, EventAfterEachMigrate, &info, schema); err != nil {
+		_ = transaction.Rollback()
+		return MigrationInfo{}, err
 	}
 	executionTime := int(time.Since(start).Milliseconds())
 
@@ -136,9 +169,75 @@ func (f *Migrator) applyMigration(ctx context.Context, db *sql.DB, history *sche
 		_ = transaction.Rollback()
 		return MigrationInfo{}, err
 	}
+	if err := history.insert(ctx, transaction, f.buildRecord(migration, rank, installedBy, executionTime, true)); err != nil {
+		_ = transaction.Rollback()
+		return MigrationInfo{}, err
+	}
+	if err := transaction.Commit(); err != nil {
+		return MigrationInfo{}, fmt.Errorf("goway: committing migration %s: %w", migration.script, err)
+	}
+	return f.finishInfo(info, migration, rank, installedBy, executionTime, outOfOrder), nil
+}
 
+// applyWithoutTransaction runs a migration that opted out of the transaction,
+// for statements such as PostgreSQL's CREATE INDEX CONCURRENTLY or SQLite's
+// VACUUM that cannot run inside a transaction block. It uses a dedicated
+// connection and, on failure, records a failed history row since there is no
+// transaction to roll back.
+func (f *Migrator) applyWithoutTransaction(ctx context.Context, db *sql.DB, history *schemaHistory, migration *resolvedMigration, statements []string, schema, installedBy string, info MigrationInfo, outOfOrder bool) (MigrationInfo, error) {
+	connection, err := db.Conn(ctx)
+	if err != nil {
+		return MigrationInfo{}, err
+	}
+	defer connection.Close()
+
+	if searchPath := f.dialect.sessionSearchPathSQL(schema); searchPath != "" {
+		if _, err := connection.ExecContext(ctx, searchPath); err != nil {
+			return MigrationInfo{}, fmt.Errorf("goway: setting search path for %s: %w", migration.script, err)
+		}
+	}
+
+	start := time.Now()
+	runErr := f.runStatements(ctx, connection, migration, statements, &info, schema)
+	executionTime := int(time.Since(start).Milliseconds())
+
+	rank, err := history.nextInstalledRank(ctx, connection)
+	if err != nil {
+		if runErr != nil {
+			return MigrationInfo{}, runErr
+		}
+		return MigrationInfo{}, err
+	}
+
+	if runErr != nil {
+		// Best effort: record the failure so it is visible and can be repaired.
+		_ = history.insert(ctx, connection, f.buildRecord(migration, rank, installedBy, executionTime, false))
+		return MigrationInfo{}, runErr
+	}
+	if err := history.insert(ctx, connection, f.buildRecord(migration, rank, installedBy, executionTime, true)); err != nil {
+		return MigrationInfo{}, err
+	}
+	return f.finishInfo(info, migration, rank, installedBy, executionTime, outOfOrder), nil
+}
+
+// runStatements fires the per-migration callbacks around the migration's own
+// statements on the given executor.
+func (f *Migrator) runStatements(ctx context.Context, exec Execer, migration *resolvedMigration, statements []string, info *MigrationInfo, schema string) error {
+	if err := f.fireCallbacks(ctx, exec, EventBeforeEachMigrate, info, schema); err != nil {
+		return err
+	}
+	for _, statement := range statements {
+		if _, err := exec.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("goway: applying migration %s: %w", migration.script, err)
+		}
+	}
+	return f.fireCallbacks(ctx, exec, EventAfterEachMigrate, info, schema)
+}
+
+// buildRecord assembles the schema history row for an applied migration.
+func (f *Migrator) buildRecord(migration *resolvedMigration, rank int, installedBy string, executionTime int, success bool) appliedMigration {
 	checksum := migration.checksum
-	record := appliedMigration{
+	return appliedMigration{
 		installedRank: rank,
 		version:       migration.version,
 		description:   migration.description,
@@ -147,33 +246,69 @@ func (f *Migrator) applyMigration(ctx context.Context, db *sql.DB, history *sche
 		checksum:      &checksum,
 		installedBy:   installedBy,
 		executionTime: executionTime,
-		success:       true,
+		success:       success,
 	}
-	if err := history.insert(ctx, transaction, record); err != nil {
-		_ = transaction.Rollback()
-		return MigrationInfo{}, err
-	}
-	if err := transaction.Commit(); err != nil {
-		return MigrationInfo{}, fmt.Errorf("goway: committing migration %s: %w", migration.script, err)
-	}
+}
 
+// finishInfo completes the public migration info for a successfully applied
+// migration.
+func (f *Migrator) finishInfo(info MigrationInfo, migration *resolvedMigration, rank int, installedBy string, executionTime int, outOfOrder bool) MigrationInfo {
 	state := StateSuccess
-	if entry.outOfOrder {
+	if outOfOrder {
 		state = StateOutOfOrder
 	}
+	checksum := migration.checksum
 	installedOn := nowUTC()
-	return MigrationInfo{
-		Version:       migration.version.String(),
-		Description:   migration.description,
-		Type:          string(migration.migrationType),
-		Script:        migration.script,
-		Checksum:      &checksum,
-		State:         state,
-		InstalledRank: rank,
-		InstalledOn:   &installedOn,
-		InstalledBy:   installedBy,
-		ExecutionTime: executionTime,
-	}, nil
+	info.Checksum = &checksum
+	info.State = state
+	info.InstalledRank = rank
+	info.InstalledOn = &installedOn
+	info.InstalledBy = installedBy
+	info.ExecutionTime = executionTime
+	return info
+}
+
+// fireCallbacks runs the SQL callback scripts and the programmatic callbacks
+// registered for the given event, in that order.
+func (f *Migrator) fireCallbacks(ctx context.Context, exec Execer, event CallbackEvent, migration *MigrationInfo, schema string) error {
+	for _, callback := range f.sqlCallbacks {
+		if callback.event != event {
+			continue
+		}
+		if err := f.runSQLCallback(ctx, exec, callback, schema); err != nil {
+			return err
+		}
+	}
+	for _, callback := range f.configuration.callbacks {
+		if err := callback.Handle(ctx, event, exec, migration); err != nil {
+			return fmt.Errorf("goway: callback for %s: %w", event, err)
+		}
+	}
+	return nil
+}
+
+// runSQLCallback executes the statements of a single SQL callback script.
+func (f *Migrator) runSQLCallback(ctx context.Context, exec Execer, callback sqlCallback, schema string) error {
+	content, err := callback.read()
+	if err != nil {
+		return fmt.Errorf("goway: reading callback %s: %w", callback.script, err)
+	}
+	script, err := replacePlaceholders(string(content),
+		f.effectivePlaceholders(schema, "", callback.script),
+		f.configuration.placeholderPrefix, f.configuration.placeholderSuffix)
+	if err != nil {
+		return err
+	}
+	statements, err := f.dialect.splitStatements(script)
+	if err != nil {
+		return err
+	}
+	for _, statement := range statements {
+		if _, err := exec.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("goway: callback %s: %w", callback.script, err)
+		}
+	}
+	return nil
 }
 
 // recordSchemaCreation writes the synthetic entry that documents schemas created

@@ -79,6 +79,12 @@ type Dialect interface {
 	// string when the dialect has no such concept.
 	setSearchPathSQL(schema string) string
 
+	// sessionSearchPathSQL returns a statement that makes the given schema the
+	// default for the whole session rather than a single transaction, for use by
+	// migrations that run without a transaction. It returns an empty string when
+	// the dialect has no such concept.
+	sessionSearchPathSQL(schema string) string
+
 	// cleanStatements returns the statements that drop every object in the given
 	// schema, querying the database when the set of objects must be discovered
 	// dynamically.

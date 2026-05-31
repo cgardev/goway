@@ -12,6 +12,7 @@ type Migrator struct {
 	configuration *Configuration
 	dialect       Dialect
 	resolved      []*resolvedMigration
+	sqlCallbacks  []sqlCallback
 }
 
 // Dialect returns the dialect that was configured or detected.

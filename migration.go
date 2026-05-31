@@ -45,6 +45,10 @@ const (
 	// it was last applied and will be re-applied.
 	StateOutdated MigrationState = "Outdated"
 
+	// StateSuperseded indicates an older applied run of a repeatable migration
+	// that has since been re-applied; only the newest run is current.
+	StateSuperseded MigrationState = "Superseded"
+
 	// StateMissing indicates a successfully applied migration that can no longer
 	// be resolved from the configured locations.
 	StateMissing MigrationState = "Missing"
@@ -92,6 +96,10 @@ type resolvedMigration struct {
 
 	// migrationType classifies the migration for the history table.
 	migrationType MigrationType
+
+	// noTransaction reports whether the script opted out of the per-migration
+	// transaction through a comment directive.
+	noTransaction bool
 
 	// read returns the raw script content.
 	read func() ([]byte, error)

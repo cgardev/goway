@@ -45,7 +45,7 @@ func computeInfos(resolved []*resolvedMigration, applied []appliedMigration, con
 	}
 
 	appliedVersioned := make(map[string]*appliedMigration)
-	repeatableApplied := make(map[string]*appliedMigration)
+	var appliedRepeatables []*appliedMigration
 	var baseline *appliedMigration
 	var current *Version
 	noteCurrent := func(version *Version) {
@@ -72,7 +72,7 @@ func computeInfos(resolved []*resolvedMigration, applied []appliedMigration, con
 				noteCurrent(record.version)
 			}
 		default:
-			repeatableApplied[record.description] = record
+			appliedRepeatables = append(appliedRepeatables, record)
 		}
 	}
 
@@ -101,11 +101,11 @@ func computeInfos(resolved []*resolvedMigration, applied []appliedMigration, con
 
 	versionedEntries := make([]*migrationInfoEntry, 0, len(versionKeys))
 	for _, key := range versionKeys {
-		resolvedMigration := resolvedVersioned[key]
-		appliedMigration := appliedVersioned[key]
+		resolvedForKey := resolvedVersioned[key]
+		appliedForKey := appliedVersioned[key]
 		entry := &migrationInfoEntry{
-			resolved: resolvedMigration,
-			applied:  appliedMigration,
+			resolved: resolvedForKey,
+			applied:  appliedForKey,
 			version:  versionSet[key],
 		}
 		populateVersionedEntry(entry, configuration, current, baselineVersion, maxResolved)
@@ -127,7 +127,14 @@ func computeInfos(resolved []*resolvedMigration, applied []appliedMigration, con
 	})
 	entries = append(entries, versionedEntries...)
 
-	// Repeatable entries are the union of resolved and applied descriptions.
+	// Repeatable entries keep every applied run plus any resolved repeatable that
+	// has never been applied. For each description the run with the highest
+	// installed rank is current; older runs are marked superseded.
+	appliedByDescription := make(map[string][]*appliedMigration)
+	for _, record := range appliedRepeatables {
+		appliedByDescription[record.description] = append(appliedByDescription[record.description], record)
+	}
+
 	repeatableKeys := make([]string, 0)
 	repeatableSet := make(map[string]bool)
 	resolvedRepeatableByDescription := make(map[string]*resolvedMigration)
@@ -138,7 +145,7 @@ func computeInfos(resolved []*resolvedMigration, applied []appliedMigration, con
 			repeatableSet[migration.description] = true
 		}
 	}
-	for description := range repeatableApplied {
+	for description := range appliedByDescription {
 		if !repeatableSet[description] {
 			repeatableKeys = append(repeatableKeys, description)
 			repeatableSet[description] = true
@@ -147,15 +154,42 @@ func computeInfos(resolved []*resolvedMigration, applied []appliedMigration, con
 	sort.Strings(repeatableKeys)
 
 	for _, description := range repeatableKeys {
-		resolvedMigration := resolvedRepeatableByDescription[description]
-		appliedMigration := repeatableApplied[description]
-		entry := &migrationInfoEntry{
-			resolved:    resolvedMigration,
-			applied:     appliedMigration,
-			description: description,
+		resolvedForKey := resolvedRepeatableByDescription[description]
+		runs := appliedByDescription[description]
+		sort.SliceStable(runs, func(i, j int) bool {
+			return runs[i].installedRank < runs[j].installedRank
+		})
+
+		latestRank := -1
+		for _, run := range runs {
+			if run.installedRank > latestRank {
+				latestRank = run.installedRank
+			}
 		}
-		populateRepeatableEntry(entry)
-		entries = append(entries, entry)
+
+		for _, run := range runs {
+			entry := &migrationInfoEntry{
+				applied:     run,
+				description: description,
+				script:      run.script,
+			}
+			if run.installedRank == latestRank {
+				entry.resolved = resolvedForKey
+				populateRepeatableEntry(entry)
+			} else {
+				entry.state = StateSuperseded
+			}
+			entries = append(entries, entry)
+		}
+
+		if len(runs) == 0 && resolvedForKey != nil {
+			entry := &migrationInfoEntry{
+				resolved:    resolvedForKey,
+				description: description,
+			}
+			populateRepeatableEntry(entry)
+			entries = append(entries, entry)
+		}
 	}
 
 	return &migrationInfoService{entries: entries, current: current}

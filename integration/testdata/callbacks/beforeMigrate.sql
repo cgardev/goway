@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS audit (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    note TEXT NOT NULL
+);
+
+INSERT INTO audit (note) VALUES ('before');

@@ -49,6 +49,8 @@ type Configuration struct {
 	target            *Version
 	installedBy       string
 
+	callbacks []Callback
+
 	configErr error
 }
 
@@ -228,6 +230,13 @@ func (c *Configuration) Target(version string) *Configuration {
 	return c
 }
 
+// Callbacks registers programmatic callbacks invoked during a migrate run, in
+// addition to any SQL callback scripts found in the configured locations.
+func (c *Configuration) Callbacks(callbacks ...Callback) *Configuration {
+	c.callbacks = append(c.callbacks, callbacks...)
+	return c
+}
+
 // InstalledBy overrides the user recorded for applied migrations.
 func (c *Configuration) InstalledBy(user string) *Configuration {
 	c.installedBy = user
@@ -275,7 +284,7 @@ func (c *Configuration) LoadContext(ctx context.Context) (*Migrator, error) {
 		dialect = detected
 	}
 
-	resolved, err := resolveMigrations(c)
+	resolved, callbacks, err := resolveMigrations(c)
 	if err != nil {
 		return nil, err
 	}
@@ -284,5 +293,6 @@ func (c *Configuration) LoadContext(ctx context.Context) (*Migrator, error) {
 		configuration: c,
 		dialect:       dialect,
 		resolved:      resolved,
+		sqlCallbacks:  callbacks,
 	}, nil
 }

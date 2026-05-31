@@ -124,6 +124,28 @@ Every command is a method on the loaded `*goway.Flyway` value and takes a
 | `Repair`   | Removes failed entries and realigns recorded checksums.                 |
 | `Clean`    | Drops every object in the managed schemas. Disabled by default.         |
 
+### Callbacks
+
+Register lifecycle callbacks either as SQL scripts placed in the configured
+locations (`beforeMigrate.sql`, `afterMigrate.sql`, `beforeEachMigrate.sql`,
+`afterEachMigrate__description.sql`) or programmatically through
+`Configure().Callbacks(...)` with a value implementing `Callback`, or the
+`CallbackFunc` adapter.
+
+### Non-transactional migrations
+
+A migration that cannot run inside a transaction, such as one using PostgreSQL's
+`CREATE INDEX CONCURRENTLY` or SQLite's `VACUUM`, opts out of the per-migration
+transaction with a directive on the first lines of the script:
+
+```sql
+-- goway:noTransaction
+CREATE INDEX CONCURRENTLY idx_users_email ON users (email);
+```
+
+The statements then run directly on a dedicated connection and the history row
+is still recorded.
+
 ## Command line tool
 
 A command line front end lives in the `cmd/goway` module.
@@ -171,12 +193,12 @@ go -C integration test ./... -count=1
 
 Implemented: versioned and repeatable SQL migrations, the schema history table,
 migrate, info, validate, baseline, repair and clean, placeholder replacement,
-multiple locations, embedded file systems, schema creation, and a command line
-tool.
+multiple locations, embedded file systems, schema creation, lifecycle callbacks
+(SQL scripts and programmatic), per-script non-transactional execution, the
+superseded state for repeatable migrations, and a command line tool.
 
-Not yet implemented: Java style code based migrations, lifecycle callbacks, undo
-migrations, and listing every historical run of a repeatable migration (only the
-latest run is reported).
+Not yet implemented: Go code based migrations, undo migrations, and the grouped
+and mixed transaction modes.
 
 ## Acknowledgements and License
 

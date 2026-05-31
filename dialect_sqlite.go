@@ -78,6 +78,8 @@ func (sqliteDialect) splitStatements(sql string) ([]string, error) {
 
 func (sqliteDialect) setSearchPathSQL(string) string { return "" }
 
+func (sqliteDialect) sessionSearchPathSQL(string) string { return "" }
+
 // cleanStatements enumerates the user defined objects from the SQLite catalog
 // and returns statements to drop each of them. Internal objects whose names
 // begin with the reserved prefix are skipped.
