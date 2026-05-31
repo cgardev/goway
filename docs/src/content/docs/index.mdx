@@ -1,0 +1,84 @@
+---
+title: goway
+description: A version-based database schema migration library for Go, modeled on Flyway, for PostgreSQL and SQLite.
+template: splash
+hero:
+  tagline: A version-based database schema migration library for Go, modeled on Flyway. Discover SQL migrations, record them in a schema history table, and bring PostgreSQL or SQLite up to date — with a zero-dependency core.
+  image:
+    file: ../../assets/sql-file.png
+  actions:
+    - text: Get Started
+      link: /goway/getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/cgardev/goway
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why goway?
+
+goway brings Flyway's proven migration model to Go: immutable, ordered,
+checksummed SQL migrations recorded in a schema history table. It runs inside
+your own application using the connection pool you already own, so there is no
+external binary to install and no heavyweight framework to adopt.
+
+<CardGrid stagger>
+	<Card title="Zero-Dependency Core" icon="rocket">
+		The library depends only on the standard library. Database access goes
+		through `database/sql`, so you bring your own driver.
+	</Card>
+	<Card title="PostgreSQL & SQLite" icon="seti:db">
+		First-class support for both, with SQLite handled by the pure-Go
+		`modernc.org/sqlite` driver — no cgo required.
+	</Card>
+	<Card title="Flyway-Compatible" icon="approve-check">
+		The same `V`/`R` naming, the same CRC32 checksums, and the same
+		`flyway_schema_history` table, so existing migration sets just work.
+	</Card>
+	<Card title="Embeddable" icon="document">
+		Read migrations from the file system or embed them into your binary with
+		`go:embed`. Run migrate at startup, in tests, or from the CLI.
+	</Card>
+</CardGrid>
+
+## Installation
+
+```sh
+go get github.com/cgardev/goway
+```
+
+## A Quick Taste
+
+```go
+migrator, err := goway.Configure().
+	DataSource(database).
+	Locations("filesystem:db/migration").
+	Schemas("public").
+	Load()
+if err != nil {
+	log.Fatal(err)
+}
+
+result, err := migrator.Migrate(context.Background())
+// applied N migration(s); schema is now at version X
+```
+
+[Get Started →](/goway/getting-started/)
+
+## What's Next?
+
+<CardGrid>
+	<Card title="Guides" icon="open-book">
+		Learn the core concepts step-by-step, from writing your first migration to
+		callbacks and dialects.
+	</Card>
+	<Card title="Reference" icon="list-format">
+		Detailed documentation for every part of the API, from the configuration
+		builder to the schema history table.
+	</Card>
+</CardGrid>
+
+[Browse the Guides →](/goway/guides/writing-migrations/)
