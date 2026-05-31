@@ -1,5 +1,12 @@
 # goway
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/cgardev/goway.svg)](https://pkg.go.dev/github.com/cgardev/goway)
+[![Go Report Card](https://goreportcard.com/badge/github.com/cgardev/goway)](https://goreportcard.com/report/github.com/cgardev/goway)
+[![CI](https://github.com/cgardev/goway/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cgardev/goway/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/cgardev/goway)](go.mod)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#status-and-roadmap)
+
 A version-based database schema migration library for Go, inspired by the
 behavior and configuration model of [Flyway](https://flywaydb.org/). It discovers
 versioned and repeatable SQL migration scripts, records what has been applied in
